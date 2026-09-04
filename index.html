@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Entrega Express — corrida na linha</title>
+<title>Bandeja Assassina — corrida na linha</title>
 <style>
   :root{
     --navy-deep:#0B1F3A;
@@ -30,7 +30,8 @@
     -webkit-tap-highlight-color: transparent;
   }
   .wrap{
-    height:100%;
+    height:100vh;
+    height:100dvh;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -38,8 +39,8 @@
   }
   .stage{
     position:relative;
-    width:min(96vw, calc(92vh * 16 / 9), 1180px);
-    aspect-ratio:16/9;
+    width:min(96vw, 1180px);
+    height:min(88dvh, 760px);
     background:var(--navy-deep);
     border-radius:14px;
     overflow:hidden;
@@ -286,7 +287,7 @@
 
     <div class="overlay" id="startScreen">
       <div class="panel">
-        <h1 class="wordmark">Entrega <span>Express</span></h1>
+        <h1 class="wordmark">Bandeja <span>Assassina</span></h1>
         <p class="subtitle">Atravesse a linha de produção sem derrubar a caixa. Desvie das engrenagens e dos motores suspensos.</p>
         <div class="howto">
           <div class="howto-item">
@@ -334,21 +335,23 @@
   var ctx = canvas.getContext('2d');
   var stage = document.getElementById('stage');
 
-  var BASE_W = 960, BASE_H = 540;
+  var REF_W = 960, BASE_H = 540;
   var GROUND_Y = 430;
+  var VIEW_W = REF_W;      // actual visible width in virtual units (varies by device)
+  var SPEED_SCALE = 1;     // VIEW_W / REF_W, keeps reaction time consistent across screens
 
-  var scaleX = 1, scaleY = 1;
   function setupCanvas(){
     var rect = stage.getBoundingClientRect();
     var dpr = window.devicePixelRatio || 1;
+    var scale = rect.height / BASE_H; // uniform scale, driven by height
+    VIEW_W = rect.width / scale;
+    SPEED_SCALE = VIEW_W / REF_W;
     canvas.width = Math.round(rect.width * dpr);
     canvas.height = Math.round(rect.height * dpr);
-    scaleX = rect.width / BASE_W;
-    scaleY = rect.height / BASE_H;
-    ctx.setTransform(dpr * scaleX, 0, 0, dpr * scaleY, 0, 0);
+    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+    PLAYER_X = Math.max(85, Math.min(200, VIEW_W * 0.17));
   }
   window.addEventListener('resize', setupCanvas);
-  setupCanvas();
 
   // ---------------------------------------------------------------
   // Audio (WebAudio, no external assets)
@@ -388,7 +391,9 @@
   var PLAYER_X = 150;
   var STAND_H = 92, DUCK_H = 54, PLAYER_W = 52;
   var GRAVITY = 1750, JUMP_VEL = -650;
-  var HI_SCORE_KEY = 'entregaExpressHighScore';
+  var HI_SCORE_KEY = 'bandejaAssassinaHighScore';
+
+  setupCanvas();
 
   // ---------------------------------------------------------------
   // State
@@ -437,12 +442,12 @@
   function spawnObstacle(){
     var roll = Math.random();
     if (roll < 0.52){
-      obstacles.push({ type:'gear', x: BASE_W + 40, r: 27, hit:false, angle:0 });
+      obstacles.push({ type:'gear', x: VIEW_W + 40, r: 27, hit:false, angle:0 });
     } else {
-      obstacles.push({ type:'engine', x: BASE_W + 60, w: 84, hit:false, sway: Math.random()*6.28 });
+      obstacles.push({ type:'engine', x: VIEW_W + 60, w: 84, hit:false, sway: Math.random()*6.28 });
     }
     if (Math.random() < 0.42){
-      collectibles.push({ x: BASE_W + 220 + Math.random()*60, taken:false, bob: Math.random()*6.28 });
+      collectibles.push({ x: VIEW_W + 220 + Math.random()*60, taken:false, bob: Math.random()*6.28 });
     }
   }
 
@@ -565,21 +570,23 @@
   }
 
   function update(dt){
-    bgSlow += gameSpeed*0.15*dt;
-    bgMed  += gameSpeed*0.42*dt;
+    var pxSpeed = gameSpeed * SPEED_SCALE;
+    bgSlow += pxSpeed*0.15*dt;
+    bgMed  += pxSpeed*0.42*dt;
 
     if (state !== 'playing'){
       updateParticles(dt);
       return;
     }
 
-    // difficulty ramp
+    // difficulty ramp (device-independent; drives score & spawn pacing)
     gameSpeed = Math.min(650, gameSpeed + 5.2*dt);
+    pxSpeed = gameSpeed * SPEED_SCALE;
     distance += gameSpeed*dt;
     score += gameSpeed*dt*0.045;
     document.getElementById('scoreValue').textContent = Math.floor(score);
 
-    bgFast += gameSpeed*dt;
+    bgFast += pxSpeed*dt;
 
     if (invulnerable>0) invulnerable -= dt;
     if (shakeTimer>0) shakeTimer -= dt;
@@ -609,7 +616,7 @@
     var pRect = playerRect();
     for (var i=obstacles.length-1;i>=0;i--){
       var o = obstacles[i];
-      o.x -= gameSpeed*dt;
+      o.x -= pxSpeed*dt;
       if (o.type==='gear'){ o.angle += gameSpeed*dt*0.05; }
       else { o.sway += dt*3; }
 
@@ -638,7 +645,7 @@
     // collectibles
     for (var j=collectibles.length-1;j>=0;j--){
       var c = collectibles[j];
-      c.x -= gameSpeed*dt;
+      c.x -= pxSpeed*dt;
       c.bob += dt*4;
       if (c.x < -60){ collectibles.splice(j,1); continue; }
       if (!c.taken){
@@ -670,7 +677,7 @@
   // Render
   // ---------------------------------------------------------------
   function draw(){
-    ctx.clearRect(0,0,BASE_W,BASE_H);
+    ctx.clearRect(0,0,VIEW_W,BASE_H);
 
     var shakeX=0, shakeY=0;
     if (shakeTimer>0){
@@ -698,7 +705,7 @@
     g.addColorStop(0, '#0B1F3A');
     g.addColorStop(1, '#173768');
     ctx.fillStyle = g;
-    ctx.fillRect(0,0,BASE_W,GROUND_Y);
+    ctx.fillRect(0,0,VIEW_W,GROUND_Y);
 
     // faint big roundel watermark
     ctx.save();
@@ -706,7 +713,7 @@
     ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 10;
     ctx.beginPath();
-    ctx.arc(BASE_W*0.78, 150, 90, 0, Math.PI*2);
+    ctx.arc(VIEW_W*0.78, 150, 90, 0, Math.PI*2);
     ctx.stroke();
     ctx.restore();
 
@@ -714,7 +721,7 @@
     var winW = 70, winGap = 60, winY = 60, winH = 90;
     var total = winW+winGap;
     var offset = tileMod(bgSlow, total);
-    for (var x = -offset - total; x < BASE_W+total; x += total){
+    for (var x = -offset - total; x < VIEW_W+total; x += total){
       ctx.fillStyle = 'rgba(180,210,255,0.10)';
       ctx.fillRect(x, winY, winW, winH);
       ctx.strokeStyle = 'rgba(180,210,255,0.18)';
@@ -729,7 +736,7 @@
     // hanging lamps
     var lampGap = 220;
     var lampOff = tileMod(bgSlow*1.1, lampGap);
-    for (var lx = -lampOff; lx < BASE_W+lampGap; lx += lampGap){
+    for (var lx = -lampOff; lx < VIEW_W+lampGap; lx += lampGap){
       ctx.strokeStyle = 'rgba(255,255,255,0.15)';
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(lx,0); ctx.lineTo(lx,26); ctx.stroke();
@@ -745,7 +752,7 @@
     // mid steel pillars, medium parallax
     var pGap = 240;
     var pOff = tileMod(bgMed, pGap);
-    for (var px = -pOff; px < BASE_W+pGap; px += pGap){
+    for (var px = -pOff; px < VIEW_W+pGap; px += pGap){
       var pg = ctx.createLinearGradient(px-9,0,px+9,0);
       pg.addColorStop(0,'#2c3238'); pg.addColorStop(0.5,'#5b636b'); pg.addColorStop(1,'#22262b');
       ctx.fillStyle = pg;
@@ -756,19 +763,19 @@
   function drawFloor(){
     ctx.fillStyle = 'var(--concrete)';
     ctx.fillStyle = '#4B4E53';
-    ctx.fillRect(0, GROUND_Y, BASE_W, BASE_H-GROUND_Y);
+    ctx.fillRect(0, GROUND_Y, VIEW_W, BASE_H-GROUND_Y);
     ctx.fillStyle = '#3A3D42';
-    ctx.fillRect(0, GROUND_Y, BASE_W, 10);
+    ctx.fillRect(0, GROUND_Y, VIEW_W, 10);
 
     // scrolling hazard stripes (nod to the crosswalk reference)
     var stripeW = 34, gap = 34, step = stripeW+gap;
     var off = tileMod(bgFast, step);
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, GROUND_Y+14, BASE_W, 30);
+    ctx.rect(0, GROUND_Y+14, VIEW_W, 30);
     ctx.clip();
     ctx.fillStyle = 'rgba(255,198,39,0.85)';
-    for (var x = -off-step; x < BASE_W+step; x += step){
+    for (var x = -off-step; x < VIEW_W+step; x += step){
       ctx.save();
       ctx.transform(1,0,-0.5,1,0,0);
       ctx.fillRect(x, GROUND_Y+10, stripeW, 40);
@@ -781,7 +788,7 @@
     ctx.lineWidth = 2;
     var seamGap = 90;
     var sOff = tileMod(bgFast, seamGap);
-    for (var sx = -sOff; sx < BASE_W+seamGap; sx += seamGap){
+    for (var sx = -sOff; sx < VIEW_W+seamGap; sx += seamGap){
       ctx.beginPath(); ctx.moveTo(sx, GROUND_Y+60); ctx.lineTo(sx-10, BASE_H); ctx.stroke();
     }
   }
