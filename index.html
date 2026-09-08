@@ -408,10 +408,10 @@ function heroLimb(parent,a,b,profile,m){let d=V.sub(b,a),len=Math.hypot(...d),n=
 
 function createDetailedDriver(parent,renderer,photo,jerseyPhoto){
   const driver=group(parent,[-.44,.96,-1.21]),limbs=[];
-  const skin=material('#bb9479',{roughness:.72,kind:6}),skinShade=material('#a58068',{roughness:.86,kind:6});
+  const skin=material('#bb9479',{roughness:.72,kind:6});
   const shirt=material('#ffffff',{roughness:.91,kind:3,texture:heroCrop(renderer,jerseyPhoto,393,205,30,88)});
   const jerseyFront=material('#ffffff',{roughness:.9,kind:3,texture:renderer.texture(jerseyPhoto)});
-  const trousers=material('#a29b81',{roughness:.98,kind:3}),seam=material('#706b59',{roughness:1}),beard=material('#51483f',{roughness:1,kind:7});
+  const trousers=material('#a29b81',{roughness:.98,kind:3}),seam=material('#706b59',{roughness:1});
   const torsoProfile=[[.02,.165,.12,.045],[.11,.185,.135,.032],[.25,.194,.138,.009],[.38,.221,.137,.005],[.49,.234,.129,.012],[.56,.212,.104,.025],[.62,.081,.074,.006]];
   const torso=heroLoft(torsoProfile,72,(p,a,j)=>{let fold=Math.sin(a*13+j*.8)*.0025;return[p[0]*(1+fold),p[1],p[2]+fold]});
   const frontTorso={v:torso.v.slice(),i:[]},backTorso={v:torso.v.slice(),i:[]};
@@ -419,7 +419,8 @@ function createDetailedDriver(parent,renderer,photo,jerseyPhoto){
   for(let i=0;i<torso.i.length;i+=3){let tri=torso.i.slice(i,i+3),facing=tri.reduce((sum,j)=>sum+torso.v[j*8+5],0);(facing<-.12?frontTorso.i:backTorso.i).push(...tri);}
   mesh(driver,frontTorso,jerseyFront);mesh(driver,backTorso,shirt);
   mesh(driver,shape.sphere,trousers,[0,.035,-.005],[.377,.22,.355]);
-  mesh(driver,shape.cylinder,skin,[0,.672,-.005],[.148,.13,.148]);
+  // The neck tapers into the jaw, with no cylindrical lip behind the ears.
+  mesh(driver,heroLoft([[.605,.070,.064,.008],[.648,.066,.064,.009],[.704,.061,.061,.015],[.758,.059,.058,.018]],48),skin);
   const collar=material('#121615',{roughness:.88}),piping=material('#e7e9e2',{roughness:1});
   mesh(driver,torus(.076,.013,48,10),collar,[0,.647,.005],[1,1,1],[Math.PI/2,0,0]);
   for(let side of[-1,1]){
@@ -431,40 +432,68 @@ function createDetailedDriver(parent,renderer,photo,jerseyPhoto){
   function endMixForJersey(a,b,t){return a.map((v,i)=>v+(b[i]-v)*t)}
   const head=group(driver,[0,.843,-.018],[.015,.06,-.025]);
   const source=document.createElement('canvas');source.width=photo.width;source.height=photo.height;let c=source.getContext('2d');c.drawImage(photo,0,0);let data=c.getImageData(0,0,source.width,source.height).data;
-  const headProfile=[];
-  for(let i=0;i<=72;i++){
-    let t=i/72,y=-.177+t*.370,s=Math.sin(Math.PI*t),rx=.128*Math.pow(Math.max(s,.001),.48),rz=.126*Math.pow(Math.max(s,.001),.43);
-    if(y<-.065)rx*=.81+.19*(y+.177)/.112;headProfile.push([y,rx,rz,y>0?.008:0]);
-  }
-  // Project the original face onto the sculpted silhouette; narrow the scalp UVs
-  // with the skull to keep the garage background out of the skin.
-  const faceAtlas=canvasTexture(renderer,1536,1024,ctx=>{
-    let out=ctx.createImageData(1536,1024);for(let y=0;y<1024;y++)for(let x=0;x<1536;x++){
-      let a=x/1535*Math.PI*2,v=y/1023,t=1-v,q=t*72,j=Math.min(71,Math.floor(q)),f=q-j,rx=headProfile[j][1]*(1-f)+headProfile[j+1][1]*f;
-      let faceCenter=318+11*Math.pow(v,1.6),px=faceCenter-Math.cos(a)*rx/.128*89,py=65+v*222;
-      let ix=Math.max(0,Math.min(source.width-2,Math.floor(px))),iy=Math.max(0,Math.min(source.height-2,Math.floor(py))),fx=px-ix,fy=py-iy;
-      let front=Math.max(0,Math.min(1,(-Math.sin(a)+.12)/.65)),o=(y*1536+x)*4;
-      for(let k=0;k<3;k++){
-        const at=(xx,yy)=>data[(yy*source.width+xx)*4+k];let sample=(at(ix,iy)*(1-fx)+at(ix+1,iy)*fx)*(1-fy)+(at(ix,iy+1)*(1-fx)+at(ix+1,iy+1)*fx)*fy;
-        let skinBase=[179,140,112][k]+Math.sin(a*2)*3;
-        out.data[o+k]=skinBase*(1-front)+sample*front;
-      }out.data[o+3]=255;
+  const clamp=v=>Math.max(0,Math.min(1,v)),smooth=(a,b,v)=>{let t=clamp((v-a)/(b-a));return t*t*(3-2*t)};
+  // Adult proportions: 28.2 cm including the beard, 18.8 cm across the skull.
+  // Separate jaw, cheekbones and cranial vault replace the old oversized egg.
+  const outline=[[-.132,.000,.000,-.030],[-.128,.027,.039,-.024],[-.117,.051,.063,-.009],[-.101,.069,.078,.005],[-.083,.078,.086,.009],[-.060,.083,.093,.010],[-.030,.090,.100,.012],[0,.094,.100,.017],[.028,.094,.103,.018],[.057,.093,.108,.020],[.082,.088,.106,.022],[.105,.076,.097,.022],[.128,.055,.075,.019],[.144,.026,.037,.015],[.150,0,0,.012]];
+  function profileAt(y){let j=0;while(j<outline.length-2&&y>outline[j+1][0])j++;let a=outline[j],b=outline[j+1],d=b[0]-a[0],t=clamp((y-a[0])/d);
+    // Monotone Hermite interpolation smooths the skull without swelling the jaw.
+    return a.map((v,k)=>{if(!k)return y;let sec=(b[k]-v)/d,slope=i=>{if(!i||i===outline.length-1)return sec;let l=outline[i-1],p=outline[i],r=outline[i+1],dl=p[0]-l[0],dr=r[0]-p[0],sl=(p[k]-l[k])/dl,sr=(r[k]-p[k])/dr;if(sl*sr<=0)return 0;let w1=2*dr+dl,w2=dr+2*dl;return(w1+w2)/(w1/sl+w2/sr)};
+      return(2*t**3-3*t*t+1)*v+(t**3-2*t*t+t)*d*slope(j)+(-2*t**3+3*t*t)*b[k]+(t**3-t*t)*d*slope(j+1);});}
+  const headProfile=Array.from({length:113},(_,i)=>profileAt(-.132+i/112*.282));
+  // Photo landmarks undo the source portrait's turned, upward-facing pose.
+  // Both eyes and the smile now follow the mesh instead of wrapping sideways.
+  const faceX=[-1,-.65,-.38,-.15,0,.15,.38,.65,1];
+  const faceRows=[
+    [-.132,[[343,273],[345,275],[347,276],[349,276],[350,276],[352,276],[354,275],[357,274],[359,272]]],
+    [-.117,[[310,258],[324,267],[338,270],[347,271],[352,271],[358,269],[365,265],[374,259],[382,251]]],
+    [-.095,[[294,247],[313,250],[334,253],[346,255],[355,255],[365,253],[375,249],[385,243],[392,237]]],
+    [-.071,[[288,232],[309,232],[334,228],[348,227],[360,226],[372,225],[385,226],[393,226],[396,225]]],
+    [-.052,[[282,220],[306,216],[333,203],[347,200],[362,198],[375,199],[386,205],[393,214],[396,219]]],
+    [-.040,[[279,210],[304,203],[331,193],[345,189],[359,186],[374,187],[385,192],[392,205],[397,210]]],
+    [-.010,[[267,188],[289,179],[318,171],[347,166],[364,159],[376,163],[387,171],[393,181],[397,187]]],
+    [.012,[[260,169],[285,164],[314,157],[339,151],[355,147],[367,149],[382,155],[390,163],[394,170]]],
+    [.030,[[254,146],[281,142],[312,135],[335,137],[350,135],[365,133],[377,132],[385,136],[390,144]]],
+    [.047,[[252,131],[280,127],[311,120],[332,123],[347,124],[363,120],[374,120],[381,126],[388,133]]],
+    [.079,[[258,108],[280,106],[303,100],[321,100],[333,101],[347,103],[361,108],[373,114],[381,122]]],
+    [.110,[[272,91],[287,85],[303,81],[314,82],[323,85],[335,88],[347,93],[356,99],[363,105]]],
+    [.138,[[295,73],[302,70],[308,70],[313,71],[317,72],[321,74],[326,76],[331,79],[335,82]]],
+    [.150,Array.from({length:9},()=>[311,69])]
+  ];
+  function facePoint(y,q){let j=0,k=0;while(j<faceRows.length-2&&y>faceRows[j+1][0])j++;while(k<faceX.length-2&&q>faceX[k+1])k++;
+    let t=clamp((y-faceRows[j][0])/(faceRows[j+1][0]-faceRows[j][0])),u=clamp((q-faceX[k])/(faceX[k+1]-faceX[k]));
+    return[0,1].map(d=>{let a=faceRows[j][1],b=faceRows[j+1][1];return(a[k][d]*(1-u)+a[k+1][d]*u)*(1-t)+(b[k][d]*(1-u)+b[k+1][d]*u)*t});}
+  function sample(px,py,k){px=Math.max(0,Math.min(source.width-2,px));py=Math.max(0,Math.min(source.height-2,py));let ix=Math.floor(px),iy=Math.floor(py),fx=px-ix,fy=py-iy,at=(x,y)=>data[(y*source.width+x)*4+k];return(at(ix,iy)*(1-fx)+at(ix+1,iy)*fx)*(1-fy)+(at(ix,iy+1)*(1-fx)+at(ix+1,iy+1)*fx)*fy;}
+  const scalp=[0,1,2].map(k=>(sample(285,109,k)+sample(296,98,k)+sample(317,99,k))/3);
+  const faceAtlas=canvasTexture(renderer,1024,1024,ctx=>{
+    let out=ctx.createImageData(1024,1024);for(let y=0;y<1024;y++)for(let x=0;x<1024;x++){
+      let a=x/1023*Math.PI*2,h=.150-y/1023*.282,forward=-Math.sin(a),q=-Math.cos(a),[px,py]=facePoint(h,q),o=(y*1024+x)*4;
+      let front=smooth(.12,.64,forward),beardTop=-.034+.049*(1-Math.max(0,forward))**2;
+      // The beard is part of the same closed surface as the jaw: no loose flap.
+      let whiskers=(1-smooth(beardTop-.008,beardTop+.008,h))*smooth(-.22,.18,forward);
+      let grain=Math.sin(a*179+h*670)*Math.sin(a*73-h*530),tone=1-.10*clamp((.08-h)/.20);
+      for(let k=0;k<3;k++){let base=scalp[k]*tone*(1-whiskers)+([64,59,50][k]+grain*4)*whiskers;out.data[o+k]=base*(1-front)+sample(px,py,k)*front;}
+      out.data[o+3]=255;
     }ctx.putImageData(out,0,0);
   });
   const gauss=(x,y,cx,cy,wx,wy)=>Math.exp(-(((x-cx)/wx)**2)-(((y-cy)/wy)**2));
   let skull=heroLoft(headProfile,128,(p,a)=>{
-    if(Math.sin(a)<0){let f=(-Math.sin(a))**5,x=p[0],y=p[1];let nose=.039*gauss(x,y,-.036,.030,.022,.048),tip=.024*gauss(x,y,-.043,.001,.027,.019),mouth=.012*gauss(x,y,-.029,-.031,.047,.019),eyes=.009*(gauss(x,y,-.071,.073,.021,.014)+gauss(x,y,.022,.066,.026,.014)),cheeks=.011*(gauss(x,y,-.070,.011,.029,.036)+gauss(x,y,.060,.008,.031,.036));p[2]-=f*(nose+tip+mouth+cheeks-eyes);}
-    return p;
+    if(Math.sin(a)<0){let f=(-Math.sin(a))**6,x=p[0],y=p[1];
+      let bridge=.020*gauss(x,y,0,.017,.013,.030),tip=.023*gauss(x,y,0,-.009,.020,.014),ala=.009*(gauss(x,y,-.015,-.014,.010,.008)+gauss(x,y,.015,-.014,.010,.008));
+      let sockets=.005*(gauss(x,y,-.036,.030,.021,.012)+gauss(x,y,.036,.030,.021,.012)),brows=.004*(gauss(x,y,-.036,.047,.024,.009)+gauss(x,y,.036,.047,.024,.009));
+      let cheeks=.006*(gauss(x,y,-.055,-.007,.024,.023)+gauss(x,y,.055,-.007,.024,.023)),lips=.006*gauss(x,y,0,-.047,.034,.017),chin=.007*gauss(x,y,0,-.095,.036,.024);
+      p[2]-=f*(bridge+tip+ala+brows+cheeks+lips+chin-sockets);
+    }return p;
   });
-  mesh(head,skull,material('#ffffff',{texture:faceAtlas,roughness:.93,kind:5}));
-  // Taper the beard into the jaw instead of adding a cylindrical beard collar.
-  let beardShell=heroSurface((u,v)=>{let a=Math.PI*.97+u*Math.PI*1.06,y=-.181+v*.105,rx=.046+v*.058,rz=.057+v*.045;
-    return[Math.cos(a)*rx,y-.009*Math.sin(Math.PI*u),Math.sin(a)*rz-.012];},80,20,true);
-  mesh(head,beardShell,beard);
+  // Longitude is undefined at the poles; average the fan normals there.
+  for(let row of[0,112]){let n=[0,0,0];for(let k=0;k<=128;k++)n=V.add(n,skull.v.slice((row*129+k)*8+3,(row*129+k)*8+6));n=V.norm(n);for(let k=0;k<=128;k++)skull.v.splice((row*129+k)*8+3,3,...n);}
+  const faceMaterial=material('#ffffff',{texture:faceAtlas,roughness:.93,kind:5});mesh(head,skull,faceMaterial);
+  // Compact attached ears use the same photographic skin tone and lighting.
+  const earSkin=material(scalp.map(v=>v*.93/255),{roughness:.93,kind:5}),earShade=material(scalp.map(v=>v*.79/255),{roughness:.93,kind:5});
   for(let side of[-1,1]){
-    mesh(head,shape.sphere,skin,[side*.124,-.012,.010],[.047,.093,.041],[0,side*.2,side*.13]);
-    mesh(head,shape.sphere,skinShade,[side*.139,-.012,-.002],[.011,.057,.018]);
-    mesh(head,shape.sphere,skin,[side*.135,-.037,-.006],[.021,.025,.023]);
+    mesh(head,shape.sphere,earSkin,[side*.094,-.004,.011],[.026,.060,.029],[0,side*.12,side*.10]);
+    mesh(head,shape.sphere,earShade,[side*.102,-.003,-.001],[.006,.033,.010]);
+    mesh(head,shape.sphere,earSkin,[side*.099,-.024,.003],[.019,.018,.019]);
   }
   const handMat=material('#c09a7f',{roughness:.75,kind:6});
   for(let side of[-1,1]){
@@ -746,7 +775,7 @@ const heldKeys=new Set(),heldPointers=new Map();
 function syncInput(){for(let k of['left','right','brake','throttle'])input[k]=false;for(let k of heldKeys)input[k]=true;for(let k of heldPointers.values())input[k]=true;document.querySelectorAll('[data-drive]').forEach(b=>{b.classList.toggle('pressed',input[b.dataset.drive]);b.setAttribute('aria-pressed',String(input[b.dataset.drive]))})}
 function clearInput(){heldKeys.clear();heldPointers.clear();keyboardPhysical.clear();syncInput()}
 function showPlay(){$('ending-ui').hidden=true;$('game').classList.remove('ending');['intro','vehicle-caption','start-footer','end-screen','pause-screen'].forEach(id=>$(id).hidden=true);$('hud').hidden=false;$('touch-controls').hidden=false;$('pause').hidden=false;$('game').classList.add('playing')}
-function start(){if(!ready)return;ending.reset();endingTime=0;clearInput();state=newState();state.status='countdown';countdown=3.0;finishing=false;cameraMode=2;cameraSnap=true;showPlay();$('countdown').hidden=false;$('countdown').textContent='3';$('camera-label').textContent='Cabine';audio??=new EngineAudio();audio.resume();audio.mute();audio.tone(440,.10);vehicle.head.visible=false;bag.visible=true;beacon.visible=true;updateHUD()}
+function start(){if(!ready)return;ending.reset();endingTime=0;clearInput();state=newState();state.status='countdown';countdown=3.0;finishing=false;cameraMode=2;cameraSnap=true;showPlay();$('countdown').hidden=false;$('countdown').textContent='3';$('camera-label').textContent='Cabine';audio??=new EngineAudio();audio.resume();audio.mute();audio.tone(440,.10);bag.visible=true;beacon.visible=true;updateHUD()}
 function pause(){if(!['playing','countdown','ending'].includes(state.status))return;pausedStatus=state.status;state.status='paused';$('ending-ui').hidden=true;$('pause-screen').hidden=false;$('countdown').hidden=true;$('touch-controls').hidden=true;clearInput();audio?.update(0,false);$('resume').focus()}
 function resume(){if(state.status!=='paused')return;state.status=pausedStatus;$('pause-screen').hidden=true;$('countdown').hidden=state.status!=='countdown';$('touch-controls').hidden=state.status==='ending';$('ending-ui').hidden=state.status!=='ending';last=performance.now();audio?.resume()}
 function showResult(){state.status='finished';$('ending-ui').hidden=true;$('game').classList.remove('ending');$('end-screen').hidden=false;$('pause').hidden=true;$('touch-controls').hidden=true;$('hud').hidden=true;$('target-marker').hidden=true;$('countdown').hidden=true;$('result-label').textContent=state.win?'MISSÃO CUMPRIDA':'FIM DA TENTATIVA';$('result-title').textContent=state.win?'Encontrou!':state.reason==='damage'?'A Kombi parou.':'O tempo acabou.';$('result-copy').textContent=state.win?'Você encontrou o saco a tempo e completou a missão.':state.reason==='damage'?'As colisões tiraram a Kombi de circulação. Antecipe os desvios e tente novamente.':'O saco ficou pelo caminho. Faça curvas suaves e use o freio quando precisar.';$('result-time').textContent=state.time.toFixed(1).replace('.',',')+'s';$('result-distance').textContent=Math.round(state.distance)+'m';$('result-hits').textContent=state.hits;$('end-screen').querySelector('button').focus()}
@@ -756,7 +785,7 @@ function finish(){if(finishing)return;finishing=true;clearInput();audio?.update(
 }
 function skipEnding(){if(state.status!=='ending')return;endingTime=ENDING_DURATION;ending.update(endingTime);showResult()}
 function menu(){ending.reset();endingTime=0;state=newState();clearInput();$('ending-ui').hidden=true;$('game').classList.remove('ending');$('game').classList.remove('playing');['intro','vehicle-caption','start-footer'].forEach(id=>$(id).hidden=false);['hud','touch-controls','pause','end-screen','pause-screen','countdown','target-marker'].forEach(id=>$(id).hidden=true);cameraMode=0;vehicle.head.visible=true;bag.visible=true;beacon.visible=true;audio?.update(0,false);$('start').focus()}
-function switchCamera(){if(!['playing','countdown','paused'].includes(state.status))return;cameraMode=(cameraMode+1)%3;$('camera-label').textContent=['Externa','Rua livre','Cabine'][cameraMode];vehicle.head.visible=cameraMode!==2;cameraSnap=true;toast(['Visão externa','Visão livre da rua','Visão de dentro da cabine'][cameraMode],1.1)}
+function switchCamera(){if(!['playing','countdown','paused'].includes(state.status))return;cameraMode=(cameraMode+1)%3;$('camera-label').textContent=['Externa','Rua livre','Cabine'][cameraMode];cameraSnap=true;toast(['Visão externa','Visão livre da rua','Visão de dentro da cabine'][cameraMode],1.1)}
 function inspectDriver(){if(!ready||state.status!=='ready')return;inspection=!inspection;vehicle.head.visible=true;$('inspect').textContent=inspection?'Ver a Kombi':'Ver o motorista';$('showcase-title').textContent=inspection?'O MOTORISTA DA SUA FOTO':'O CLÁSSICO DA SUA FOTO';$('showcase-subject').innerHTML=inspection?'Seu <em>motorista</em>':'Kombi <em>1982</em>';$('showcase-detail').hidden=inspection;}
 function updateHUD(){ui.time.textContent=String(Math.ceil(Math.max(0,DURATION-state.time))).padStart(2,'0');ui.timeFill.style.width=(1-state.time/DURATION)*100+'%';ui.health.style.width=state.health+'%';ui.healthText.textContent=state.health+'%';ui.health.style.background=state.health<35?'#ef987c':'var(--acid)';ui.speed.textContent=Math.round(state.speed*3.6);ui.gear.textContent=state.speed<.3?'N':state.speed<6?'1':state.speed<12?'2':state.speed<18?'3':'4';let left=Math.max(0,GOAL_DISTANCE-state.distance);ui.distance.textContent=left<8?(Math.abs(state.x-GOAL_X)<1.15?'Pegue o saco!':state.x<GOAL_X?'Vire à direita →':'← Vire à esquerda'):'A '+Math.ceil(left)+' m';ui.routeFill.style.width=clamp(state.distance/GOAL_DISTANCE*100,0,100)+'%';ui.routeDot.style.left=clamp(state.distance/GOAL_DISTANCE*100,0,100)+'%';$('game').classList.toggle('low-time',state.time>=30)}
 function hit(h){audio?.crash(h.type==='hole');toast(h.type==='hole'?'Buraco! −11% de condição':'Colisão! −27% de condição',1.5);impactTime=.26;$('impact').classList.add('hit');if(navigator.vibrate)navigator.vibrate(h.type==='hole'?50:[70,30,70])}
@@ -781,9 +810,16 @@ if(isEnding){const close=clamp((endingTime-3.4)/2.2,0,1),k=close*close*(3-2*clos
 else if(isMenu&&inspection){eye=portrait?[x+.22,1.92,-2.02]:[x+.35,1.92,-2.01];target=portrait?[x-.43,1.66,-1.19]:[x-.24,1.78,-1.19];fov=portrait?54:43;}
 else if(isMenu){let a=reduceMotion?0:Math.sin(elapsed*.12)*.075;eye=portrait?[-5.3,3.0,-6.5]:[-5.5+a,2.7,-7.15];target=portrait?[1.45,.25,.1]:[-.2,1.25,-.12];fov=portrait?65:49;}
 else if(cameraMode===1){eye=[x,2.16,z-2.46];target=[x+state.vx*.10,1.36,z-65];fov=portrait?78:69;}
-else if(cameraMode===2){let yaw=vehicle.van.r[1],cs=Math.cos(yaw),sn=Math.sin(yaw);eye=[x-.44*cs-sn,1.84+vehicle.body.p[1],z+.44*sn-cs];target=[eye[0]-sn*48,1.52,eye[2]-cs*48];fov=portrait?80:76;}
+else if(cameraMode===2){
+  // Use the same current transforms as the seated driver, including suspension
+  // and steering. The lens sits just ahead of the face, never behind the neck.
+  const frame=[vehicle.van,vehicle.body,vehicle.driver].reduce((m,n)=>M.multiply(m,M.compose(n.p,n.r,n.s)),M.identity());
+  eye=M.point(frame,[0,.872,-.235]).slice(0,3);target=M.point(frame,[0,-8.728,-48.235]).slice(0,3);fov=portrait?88:84;
+}
 else{eye=[x,portrait?5.9:5.45,z+(portrait?10.6:10.5)];target=[x+state.vx*.12,1.4,z-23];fov=portrait?69:58;}
-let lerp=cameraSnap?1:1-Math.exp(-dt*(isMenu?3.0:cameraMode>0?20:11));cameraSnap=false;for(let i=0;i<3;i++){cameraEye[i]+=(eye[i]-cameraEye[i])*lerp;cameraTarget[i]+=(target[i]-cameraTarget[i])*lerp;}renderer.render(root,cameraEye,cameraTarget,fov,[x,0,z]);
+// World-space camera smoothing trails a moving van by almost a metre at speed.
+// Only the exterior views interpolate; the cabin remains attached every frame.
+let lerp=(cameraSnap||(!isMenu&&!isEnding&&cameraMode===2))?1:1-Math.exp(-dt*(isMenu?3.0:cameraMode>0?20:11));cameraSnap=false;for(let i=0;i<3;i++){cameraEye[i]+=(eye[i]-cameraEye[i])*lerp;cameraTarget[i]+=(target[i]-cameraTarget[i])*lerp;}renderer.render(root,cameraEye,cameraTarget,fov,[x,0,z]);
 let showMarker=moving&&GOAL_DISTANCE-state.distance<95;$('target-marker').hidden=!showMarker;if(showMarker){let p=renderer.project([GOAL_X,1.45,-GOAL_DISTANCE]);$('target-marker').hidden=p[2]>1||p[2]<-1;if(p[2]<=1){$('target-marker').style.left=clamp((p[0]*.5+.5)*100,9,91)+'%';$('target-marker').style.top=clamp((-.5*p[1]+.5)*100,27,78)+'%';}}
 updateHUD();requestAnimationFrame(frame);
 }catch(e){console.error(e);pause();$('error').textContent='O jogo encontrou um problema gráfico. Recarregue a página.';$('error').hidden=false;$('intro').hidden=false;}}
